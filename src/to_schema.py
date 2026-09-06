@@ -49,7 +49,8 @@ def question_to_schema(question_instance: Question) -> dict:
     class CategoryElementClass(Question):
         category: Category = field(kw_only=True)
         fields: list[Question] = field(kw_only=True)
-        def get_type_str(self) -> str:
+        @property
+        def type_str(self) -> str:
             return 'iteration'
         def validate(self, data) -> bool:
             return all(f.validate(data.get(f.name)) for f in self.fields)
@@ -118,12 +119,12 @@ def question_to_schema(question_instance: Question) -> dict:
         question_fields.extend([transform_helperfield_name(f) for f in question.helper_fields])
 
     result = {
-        "type": "object" if not question.is_plain else question.get_type_str(),
+        "type": "object" if not question.is_plain else question.type_str,
         "title": str(question.label),
         "properties": {
             f.name: question_to_schema(f) for f in question_fields
         },
-        "x-type": question.get_type_str(),
+        "x-type": question.type_str,
         "x-validation-rules": make_validation_rules(question),
         "x-widget": question.widget,
         "x-ui": {

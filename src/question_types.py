@@ -67,10 +67,11 @@ class QuestionTypeAbs(ABC):
     ValidationError = ValidationError
     def _ValidationError(self, message):
         return ValidationError(message,path=self.name)
+    @property
     @abstractmethod
-    def get_type_str(self) -> str:
-        ...
-    @abstractmethod
+    def type_str(self) -> str:
+        """Return the type as a string."""
+        raise NotImplementedError    @abstractmethod
     def validate(self, data, helper_fields_data) -> bool:
         ...
     @abstractmethod
@@ -185,7 +186,8 @@ class QuestionTypeBlock(QuestionTypeCompound):
     @property
     def response(self) -> list[Question]:
         return self.fields
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'block'
     def validate(self, data) -> bool:
         # return all(f.validate(data.get(f.name)) for f in self.fields) and self._validate_helper_fields(data.get(':helperfields', {}))
@@ -224,7 +226,8 @@ class QuestionTypeLoop(QuestionTypeCompound):
     fields: list[Question] = field(default_factory=list)
     iterations: list[Category] = field(default_factory=list)
     response: dict[str, list[Question]] = field(default_factory=dict)
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'loop'
     def validate(self, data) -> bool:
         is_good = True
@@ -269,7 +272,8 @@ class QuestionTypeText(QuestionTypePlain):
         'missing': LocalizedText('A response is required'),
         'typemismatch': LocalizedText('Expected response of type str'),
     })
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'text'
     def validate(self, data) -> bool:
         if self.is_required and data is None:
@@ -298,7 +302,8 @@ class QuestionTypeInt(QuestionTypePlain):
         'missing': LocalizedText('A response is required'),
         'typemismatch': LocalizedText('Expected response of type integer'),
     })
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'int'
     def validate(self, data) -> bool:
         if self.is_required and data is None:
@@ -327,7 +332,8 @@ class QuestionTypeFloat(QuestionTypePlain):
         'missing': LocalizedText('A response is required'),
         'typemismatch': LocalizedText('Expected response of type float (floating-point real number)'),
     })
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'float'
     def validate(self, data) -> bool:
         if self.is_required and data is None:
@@ -356,7 +362,8 @@ class QuestionTypeBool(QuestionTypePlain):
         'missing': LocalizedText('A response is required'),
         'typemismatch': LocalizedText('Expected response of type boolean'),
     })
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'boolean'
     def validate(self, data) -> bool:
         if self.is_required and data is None:
@@ -385,7 +392,8 @@ class QuestionTypeDatetime(QuestionTypePlain):
         'missing': LocalizedText('A response is required'),
         'typemismatch': LocalizedText('Expected response of type date/time'),
     })
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'datetime'
     def validate(self, data) -> bool:
         def is_date(value) -> bool:
@@ -425,7 +433,8 @@ class QuestionTypeSinglePunch(QuestionTypePlain):
         'missing': LocalizedText('A response is required'),
         'notfromresplist': LocalizedText('{resp} is not a valid category'),
     })
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'singlepunch'
     def validate(self, data) -> bool:
         if self.is_required and data is None:
@@ -455,7 +464,8 @@ class QuestionTypeMultiPunch(QuestionTypePlain):
         'missing': LocalizedText('A response is required'),
         'notfromresplist': LocalizedText('{resp} is not a valid category'),
     })
-    def get_type_str(self) -> str:
+    @property
+    def type_str(self) -> str:
         return 'multipunch'
     def validate(self, data) -> bool:
         if self.is_required and data is None:
