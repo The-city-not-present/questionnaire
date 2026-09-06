@@ -1,0 +1,3 @@
+[submodule "src/lib/translatable"]
+	path = src/lib/translatable
+	url = https://github.com/The-city-not-present/py_translatable_text_class.git
