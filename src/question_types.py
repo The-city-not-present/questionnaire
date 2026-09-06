@@ -39,6 +39,10 @@ class ValidationError(Exception):
     def __init__(self, message, path):
         super().__init__(message)
         self.path = path
+    def __str__(self) -> str:
+        message = self.args[0]
+        path = self.path
+        return f'"{message}" at {path}'
 
 def validate_name(s):
     if not isinstance(s, str):
@@ -52,6 +56,7 @@ def validate_name(s):
     return True
 
 
+@dataclass
 class QuestionTypeAbs(ABC):
     name: str
     label: LocalizedText
@@ -71,11 +76,12 @@ class QuestionTypeAbs(ABC):
     @abstractmethod
     def type_str(self) -> str:
         """Return the type as a string."""
-        raise NotImplementedError    @abstractmethod
-    def validate(self, data, helper_fields_data) -> bool:
+        raise NotImplementedError
+    @abstractmethod
+    def validate(self, data, helper_fields_data: dict|None) -> bool:
         ...
     @abstractmethod
-    def assign(self, data, helper_fields_data) -> Question:
+    def assign(self, data, helper_fields_data: dict|None) -> Question:
         ...
 
 @dataclass
@@ -84,7 +90,7 @@ class QuestionModifier(ABC):
     def as_json(self):
         raise NotImplementedError('Question object must be instantiated by specific class')
     @abstractmethod
-    def validate(self, question: Question, data: Any, helper_fields_data: dict | None = None) -> bool:
+    def validate(self, question: Question, data: Any, helper_fields_data: dict | None) -> bool:
         raise NotImplementedError('Question object must be instantiated by specific class')
 
 @dataclass
@@ -97,7 +103,7 @@ class QuestionModifierIsExclusive(QuestionModifier):
         return {
             "ExclusiveCategories": [ cat.name for cat in self.data ],
         }
-    def validate(self,question: Question, data: Any, helper_fields_data: dict | None = None) -> bool:
+    def validate(self,question: Question, data: Any, helper_fields_data: dict | None) -> bool:
         def _err():
             raise question._ValidationError(f'is_exclusive modifier can only be applied on single-punch and multi-punch quesitons')
         if not helper_fields_data:
@@ -132,7 +138,7 @@ class Question(QuestionTypeAbs):
     properties: dict[str, Any] = field(default_factory=dict)
     modifiers: set[QuestionModifier] = field(default_factory=set)
     widget: Any | None = None
-    helper_fields: dict[str, Question] | None = field(default_factory=dict)
+    helper_fields: list[Question] | None = field(default_factory=list)
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
         'missing': LocalizedText('A response is required'),
     })
@@ -144,13 +150,6 @@ class Question(QuestionTypeAbs):
         return self.name == other.name
     def __hash__(self):
         return hash(self.name)
-    def _assign_helper_fields(self, helper_fields_data: dict | None):
-        if not helper_fields_data:
-            helper_fields_data = {}
-        if hasattr(self, 'helper_fields') and self.helper_fields:
-            for h_f_name, f in self.helper_fields.items():
-                if h_f_name in helper_fields_data:
-                    f.assign(helper_fields_data.get(h_f_name)) # "h"elper_"f"field_"name"
     def _validate_helper_fields(self, helper_fields_data: dict | None = None) -> bool:
         is_good = True
         if not helper_fields_data:
@@ -158,13 +157,22 @@ class Question(QuestionTypeAbs):
         if hasattr(self, 'helper_fields') and self.helper_fields:
             if self.is_root:
                 raise InternalError('Question: Root element can\'t have helper_fields')
-            for h_f_name, f in self.helper_fields.items():
+            for f in self.helper_fields:
+                h_f_name = f.name
                 try:
-                    is_good = is_good and f.validate(helper_fields_data.get(h_f_name))
+                    is_good = is_good and f.validate(helper_fields_data.get(h_f_name),helper_fields_data.get(f'{h_f_name}.:helperfields'))
                 except ValidationError as e:
                     e.path = f'{self.name}.:helperfields.{e.path}' if not self.is_root else e.path
                     raise
         return is_good
+    def _assign_helper_fields(self, helper_fields_data: dict | None):
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if hasattr(self, 'helper_fields') and self.helper_fields:
+            for f in self.helper_fields:
+                h_f_name = f.name
+                if h_f_name in helper_fields_data:
+                    f.assign(helper_fields_data.get(h_f_name),helper_fields_data.get(f'{h_f_name}.:helperfields')) # "h"elper_"f"field_"name"
     def update(self, other):
         for f in fields(other):
             if f.name=='response':
@@ -183,53 +191,87 @@ class QuestionTypeCompound(Question):
 @dataclass
 class QuestionTypeBlock(QuestionTypeCompound):
     fields: list[Question] = field(default_factory=list)
+    error: dict[str,LocalizedText] = field(default_factory=lambda: {
+        'missing': LocalizedText('A response is required'),
+        'typemismatch': LocalizedText('Response was not sent in proper format...'),
+    })
     @property
     def response(self) -> list[Question]:
         return self.fields
     @property
     def type_str(self) -> str:
         return 'block'
-    def validate(self, data) -> bool:
-        # return all(f.validate(data.get(f.name)) for f in self.fields) and self._validate_helper_fields(data.get(':helperfields', {}))
+    def validate(self, data: dict | None, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if data is None and not self.is_required:
+            return True
+        if self.is_required and data is None:
+            raise self._ValidationError( str(self.error['missing']))
+        if not isinstance(data,dict):
+            raise self._ValidationError( str(self.error['typemismatch']))
+        assert isinstance(data,dict)
         is_good = True
         for f in self.fields:
             try:
-                is_good = is_good and f.validate(data.get(f.name))
+                is_good = is_good and f.validate(data.get(f.name),data.get(f'{f.name}.:helperfields'))
             except ValidationError as e:
                 e.path = f'{self.name}.{e.path}' if not self.is_root else e.path
                 raise
-        is_good = is_good and self._validate_helper_fields(data.get(':helperfields', {}))
+        is_good = is_good and self._validate_helper_fields(helper_fields_data)
         return is_good
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data: dict | None, helper_fields_data: dict | None) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if data is None and not self.is_required:
+            return self
+        assert isinstance(data,dict)
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         for f in self.fields:
             if f.name in data:
-                f.assign(data.get(f.name))
-        self._assign_helper_fields(data.get(':helperfields', {}))
+                f.assign(data.get(f.name),data.get(f'{f.name}.:helperfields'))
+        self._assign_helper_fields(helper_fields_data)
         return self
 
 @dataclass
 class QuestionTypeRoot(QuestionTypeBlock):
     name: str = field(default='',init=False)
     is_root: bool = field(default=True,init=False) #
-    helper_fields: dict[str, Question] | None = field(default=None,init=False)
+    helper_fields: list[Question] | None = field(default=None,init=False)
     # def __init__(self,*args,**kwargs):
     #     super().__init__(*args,**kwargs,name='')
     def _validate_name(self):
         if self.name != '':
             raise InternalError(f'Question: Root element: name must be ""')
         return True
+    def validate(self, data,helper_fields_data: dict|None = None) -> bool:
+        return super().validate(data,None)
+    def assign(self, data,helper_fields_data: dict|None = None) -> Question:
+        return super().assign(data, None)
+
 
 @dataclass
 class QuestionTypeLoop(QuestionTypeCompound):
     fields: list[Question] = field(default_factory=list)
     iterations: list[Category] = field(default_factory=list)
+    error: dict[str,LocalizedText] = field(default_factory=lambda: {
+        'missing': LocalizedText('A response is required'),
+        'typemismatch': LocalizedText('Response was not sent in proper format...'),
+    })
     response: dict[str, list[Question]] = field(default_factory=dict)
     @property
     def type_str(self) -> str:
         return 'loop'
-    def validate(self, data) -> bool:
+    def validate(self, data: dict | None, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if data is None and not self.is_required:
+            return True
+        if self.is_required and data is None:
+            raise self._ValidationError( str(self.error['missing']))
+        if not isinstance(data,dict):
+            raise self._ValidationError( str(self.error['typemismatch']))
         is_good = True
         for f in self.fields:
             for cat_spec in self.iterations:
@@ -242,14 +284,19 @@ class QuestionTypeLoop(QuestionTypeCompound):
                         if True: # if f_spec.name in data_this_iteration:
                             f: Question = response_slice[field_index]
                             try:
-                                is_good = is_good and f.validate(data_this_iteration.get(f.name))
+                                is_good = is_good and f.validate(data_this_iteration.get(f.name),data_this_iteration.get(f'{f.name}.:helperfields'))
                             except ValidationError as e:
                                 e.path = f'{self.name}[{{ {cat_spec.name} }}].{e.path}' if not self.is_root else e.path
                                 raise
-        is_good = is_good and self._validate_helper_fields(data.get(':helperfields', {}))
+        is_good = is_good and self._validate_helper_fields(helper_fields_data)
         return is_good
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data: dict | None, helper_fields_data: dict | None) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if data is None and not self.is_required:
+            return self
+        assert isinstance(data,dict)
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         for cat_spec in self.iterations:
             if cat_spec.name in data:
@@ -260,8 +307,8 @@ class QuestionTypeLoop(QuestionTypeCompound):
                 for field_index,f_spec in enumerate(self.fields):
                     if f_spec.name in data_this_iteration:
                         f: Question = response_slice[field_index]
-                        f.assign(data_this_iteration.get(f_spec.name))
-        self._assign_helper_fields(data.get(':helperfields', {}))
+                        f.assign(data_this_iteration.get(f_spec.name),data_this_iteration.get(f'{f.name}.:helperfields'))
+        self._assign_helper_fields(helper_fields_data)
         return self
 
 @dataclass
@@ -270,12 +317,14 @@ class QuestionTypeText(QuestionTypePlain):
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
         'missing': LocalizedText('A response is required'),
-        'typemismatch': LocalizedText('Expected response of type str'),
+        'typemismatch': LocalizedText('Expected response of type text'),
     })
     @property
     def type_str(self) -> str:
         return 'text'
-    def validate(self, data) -> bool:
+    def validate(self, data, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
         if self.is_required and data is None:
             raise self._ValidationError( str(self.error['missing']))
         if data is not None:
@@ -284,11 +333,13 @@ class QuestionTypeText(QuestionTypePlain):
             if self.validation is not None:
                 if not self.validation(data):
                     raise self._ValidationError('Validation failed')
-        if not self._validate_helper_fields(data.get(':helperfields', {})):
+        if not self._validate_helper_fields(helper_fields_data):
             raise self._ValidationError('Validation in helper fields failed')
         return True
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data, helper_fields_data: dict | None) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
             self.response = data
@@ -305,7 +356,9 @@ class QuestionTypeInt(QuestionTypePlain):
     @property
     def type_str(self) -> str:
         return 'int'
-    def validate(self, data) -> bool:
+    def validate(self, data, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
         if self.is_required and data is None:
             raise self._ValidationError( str(self.error['missing']))
         if data is not None:
@@ -314,11 +367,13 @@ class QuestionTypeInt(QuestionTypePlain):
             if self.validation is not None:
                 if not self.validation(data):
                     raise self._ValidationError('Validation failed')
-        if not self._validate_helper_fields(data.get(':helperfields', {})):
+        if not self._validate_helper_fields(helper_fields_data):
             raise self._ValidationError('Validation in helper fields failed')
         return True
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data, helper_fields_data: dict | None) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if not self.validate(data,helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
             self.response = data
@@ -335,7 +390,9 @@ class QuestionTypeFloat(QuestionTypePlain):
     @property
     def type_str(self) -> str:
         return 'float'
-    def validate(self, data) -> bool:
+    def validate(self, data, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
         if self.is_required and data is None:
             raise self._ValidationError( str(self.error['missing']))
         if data is not None:
@@ -344,11 +401,13 @@ class QuestionTypeFloat(QuestionTypePlain):
             if self.validation is not None:
                 if not self.validation(data):
                     raise self._ValidationError('Validation failed')
-        if not self._validate_helper_fields(data.get(':helperfields', {})):
+        if not self._validate_helper_fields(helper_fields_data):
             raise self._ValidationError('Validation in helper fields failed')
         return True
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data, helper_fields_data: dict | None) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
             self.response = data
@@ -365,7 +424,9 @@ class QuestionTypeBool(QuestionTypePlain):
     @property
     def type_str(self) -> str:
         return 'boolean'
-    def validate(self, data) -> bool:
+    def validate(self, data, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
         if self.is_required and data is None:
             raise self._ValidationError( str(self.error['missing']))
         if data is not None:
@@ -374,11 +435,13 @@ class QuestionTypeBool(QuestionTypePlain):
             if self.validation is not None:
                 if not self.validation(data):
                     raise self._ValidationError('Validation failed')
-        if not self._validate_helper_fields(data.get(':helperfields', {})):
+        if not self._validate_helper_fields(helper_fields_data):
             raise self._ValidationError('Validation in helper fields failed')
         return True
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data, helper_fields_data: dict | None) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
             self.response = data
@@ -395,7 +458,9 @@ class QuestionTypeDatetime(QuestionTypePlain):
     @property
     def type_str(self) -> str:
         return 'datetime'
-    def validate(self, data) -> bool:
+    def validate(self, data, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
         def is_date(value) -> bool:
             if isinstance(value, date):
                 return True
@@ -414,11 +479,13 @@ class QuestionTypeDatetime(QuestionTypePlain):
             if self.validation is not None:
                 if not self.validation(data):
                     raise self._ValidationError('Validation failed')
-        if not self._validate_helper_fields(data.get(':helperfields', {})):
+        if not self._validate_helper_fields(helper_fields_data):
             raise self._ValidationError('Validation in helper fields failed')
         return True
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data, helper_fields_data) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
             self.response = data
@@ -436,7 +503,9 @@ class QuestionTypeSinglePunch(QuestionTypePlain):
     @property
     def type_str(self) -> str:
         return 'singlepunch'
-    def validate(self, data) -> bool:
+    def validate(self, data, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
         if self.is_required and data is None:
             raise self._ValidationError( str(self.error['missing']))
         if data is not None:
@@ -445,11 +514,13 @@ class QuestionTypeSinglePunch(QuestionTypePlain):
             if self.validation is not None:
                 if not self.validation(data):
                     raise self._ValidationError('Validation failed')
-        if not self._validate_helper_fields(data.get(':helperfields', {})):
+        if not self._validate_helper_fields(helper_fields_data):
             raise self._ValidationError('Validation in helper fields failed')
         return True
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data, helper_fields_data: dict | None) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
             self.response = next(iter(set(cat for cat in self.categories if cat.name==data)))
@@ -467,7 +538,9 @@ class QuestionTypeMultiPunch(QuestionTypePlain):
     @property
     def type_str(self) -> str:
         return 'multipunch'
-    def validate(self, data) -> bool:
+    def validate(self, data, helper_fields_data: dict | None) -> bool:
+        if not helper_fields_data:
+            helper_fields_data = {}
         if self.is_required and data is None:
             raise self._ValidationError( str(self.error['missing']))
         if data is not None:
@@ -484,11 +557,13 @@ class QuestionTypeMultiPunch(QuestionTypePlain):
             if self.validation is not None:
                 if not self.validation(data):
                     raise self._ValidationError('Validation failed')
-        if not self._validate_helper_fields(data.get(':helperfields', {})):
+        if not self._validate_helper_fields(helper_fields_data):
             raise self._ValidationError('Validation in helper fields failed')
         return True
-    def assign(self, data) -> Question:
-        if not self.validate(data):
+    def assign(self, data, helper_fields_data) -> Question:
+        if not helper_fields_data:
+            helper_fields_data = {}
+        if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
             def find_cat(d):

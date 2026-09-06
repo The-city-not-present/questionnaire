@@ -5,6 +5,7 @@ from .question_types import (
     LocalizedText,
     ValidationError,
     Category,
+    Question,
     QuestionModifierIsExclusive,
     QuestionTypeBlock,
     QuestionTypeBool,
