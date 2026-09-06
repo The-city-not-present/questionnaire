@@ -7,7 +7,7 @@ import os
 #     sys.path.insert(0,"/Users/andrej/.../src/lib/qre")
 
 
-from src import (
+from . import (
     # LocalizedText,
     ValidationError,
     Category,
@@ -26,7 +26,7 @@ from src import (
     QuestionTypeSinglePunch,
     QuestionTypeText,
 )
-from src.to_schema import question_to_schema as to_schema
+from .to_schema import question_to_schema as to_schema
 
 
 
