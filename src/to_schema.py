@@ -46,9 +46,10 @@ def question_to_schema(question_instance: Question) -> dict:
         question.name = f':helperfields.{question.name}'
         return question
     @dataclass
-    class CategoryElementClass(Question):
+    class IterationElementClass(Question):
         category: Category = field(kw_only=True)
         fields: list[Question] = field(kw_only=True)
+        is_plain = False
         @property
         def type_str(self) -> str:
             return 'iteration'
@@ -62,6 +63,17 @@ def question_to_schema(question_instance: Question) -> dict:
                     f.assign(data.get(f.name))
             self._assign_helper_fields(data.get(':helperfields',{}))
             return self
+    @dataclass
+    class CategoryElementClass(Question):
+        category: Category = field(kw_only=True)
+        is_plain = False
+        @property
+        def type_str(self) -> str:
+            return 'category'
+        def validate(self, data) -> bool:
+            return True
+        def assign(self, data) -> Question:
+            raise InternalError('Assign to category is not possible')
 
     question = copy.copy(question_instance) # for safety, to not occasionally modify
 
@@ -70,13 +82,25 @@ def question_to_schema(question_instance: Question) -> dict:
     if hasattr(question, 'helper_fields') and question.helper_fields:
         validate_names(question.helper_fields)
 
-    if isinstance(question, CategoryElementClass):
+    if isinstance(question, IterationElementClass):
         result = {
             "type": "object",
             "title": str(question.category.label),
             "properties": {
                 f.name: question_to_schema(f) for f in question.fields
             },
+            "x-ui": {
+                **{key: value for mod in question.modifiers for key, value in mod.as_json().items()},
+            },
+            "x-properties": question.properties,
+        }
+        result['properties'] = json_schema_items_ordered(result.get('properties', {}))
+        return result
+
+    elif isinstance(question, CategoryElementClass):
+        result = {
+            "type": "object",
+            "title": str(question.category.label),
             "x-ui": {
                 **{key: value for mod in question.modifiers for key, value in mod.as_json().items()},
             },
@@ -100,7 +124,7 @@ def question_to_schema(question_instance: Question) -> dict:
             f.update(default_spec)
             return f
         question_fields = [
-            CategoryElementClass(
+            IterationElementClass(
                 name = cat.name,
                 label = cat.label,
                 properties = cat.properties,
@@ -124,6 +148,12 @@ def question_to_schema(question_instance: Question) -> dict:
         "properties": {
             f.name: question_to_schema(f) for f in question_fields
         },
+        "x-categories":
+            {
+                cat.name: question_to_schema(CategoryElementClass( name=cat.name, label=cat.label, properties=cat.properties, modifiers=cat.modifiers, category=cat ))
+                for cat in list(question.categories) or []
+            } if hasattr(question,'categories')
+            else None,
         "x-type": question.type_str,
         "x-validation-rules": make_validation_rules(question),
         "x-widget": question.widget,
