@@ -62,6 +62,7 @@ class QuestionTypeAbs(ABC):
     label: LocalizedText
     properties: dict[str, Any] = field(default_factory=dict)
     modifiers: set[QuestionModifier] = field(default_factory=set)
+    _response: Any | None = field(default=None,init=False)
     is_plain: bool = field(init=False) # indicates type "type" - compound or plain
     is_root: bool = field(default=False,init=False) #
     is_hidden: bool = field(default=False) # absolutely unnecessary, just capturing this for future
@@ -70,6 +71,9 @@ class QuestionTypeAbs(ABC):
     is_required: bool = True # should be translated to json schema
     InternalError = InternalError
     ValidationError = ValidationError
+    @property
+    def response(self) -> Any|None:
+        return self._response
     def _ValidationError(self, message):
         return ValidationError(message,path=self.name)
     @property
@@ -108,8 +112,8 @@ class QuestionModifierIsExclusive(QuestionModifier):
             raise question._ValidationError(f'is_exclusive modifier can only be applied on single-punch and multi-punch quesitons')
         if not helper_fields_data:
             helper_fields_data = {}
-        response: set = question.response if isinstance(question, QuestionTypeMultiPunch) else {question.response} if isinstance(question, QuestionTypeSinglePunch) else _err()
-        selected_exclusive = set(cat for cat in response if cat.name in set(c.name for c in response) and cat.name in set(c.name for c in self.data))
+        _response: set = question._response if isinstance(question, QuestionTypeMultiPunch) else {question._response} if isinstance(question, QuestionTypeSinglePunch) else _err()
+        selected_exclusive = set(cat for cat in _response if cat.name in set(c.name for c in _response) and cat.name in set(c.name for c in self.data))
         validation_failure = len(selected_exclusive) > 1
         if validation_failure:
             raise question._ValidationError( str(self.error['cannotcombine']).format( resp = repr(next(iter(selected_exclusive)).label) ) )
@@ -175,7 +179,7 @@ class Question(QuestionTypeAbs):
                     f.assign(helper_fields_data.get(h_f_name),helper_fields_data.get(f'{h_f_name}.:helperfields')) # "h"elper_"f"field_"name"
     def update(self, other):
         for f in fields(other):
-            if f.name=='response':
+            if f.name=='_response':
                 pass
             else:
                 setattr(self, f.name, copy.deepcopy(getattr(other, f.name)))
@@ -259,7 +263,7 @@ class QuestionTypeLoop(QuestionTypeCompound):
         'missing': LocalizedText('A response is required'),
         'typemismatch': LocalizedText('Response was not sent in proper format...'),
     })
-    response: dict[str, list[Question]] = field(default_factory=dict)
+    _response: dict[str, list[Question]] = field(default_factory=dict,init=False)
     @property
     def type_str(self) -> str:
         return 'loop'
@@ -277,9 +281,9 @@ class QuestionTypeLoop(QuestionTypeCompound):
             for cat_spec in self.iterations:
                 if True: # if cat_spec.name in data:
                     data_this_iteration = data.get(cat_spec.name)
-                    if cat_spec.name not in self.response:
-                        self.response[cat_spec.name] = [copy.deepcopy(f) for f in self.fields]
-                    response_slice = self.response.get(cat_spec.name)
+                    if cat_spec.name not in self._response:
+                        self._response[cat_spec.name] = [copy.deepcopy(f) for f in self.fields]
+                    response_slice = self._response.get(cat_spec.name)
                     for field_index, f_spec in enumerate(self.fields):
                         if True: # if f_spec.name in data_this_iteration:
                             f: Question = response_slice[field_index]
@@ -301,9 +305,9 @@ class QuestionTypeLoop(QuestionTypeCompound):
         for cat_spec in self.iterations:
             if cat_spec.name in data:
                 data_this_iteration = data.get(cat_spec.name)
-                if cat_spec.name not in self.response:
-                    self.response[cat_spec.name] = [copy.deepcopy(f) for f in self.fields]
-                response_slice = self.response.get(cat_spec.name)
+                if cat_spec.name not in self._response:
+                    self._response[cat_spec.name] = [copy.deepcopy(f) for f in self.fields]
+                response_slice = self._response.get(cat_spec.name)
                 for field_index,f_spec in enumerate(self.fields):
                     if f_spec.name in data_this_iteration:
                         f: Question = response_slice[field_index]
@@ -313,11 +317,11 @@ class QuestionTypeLoop(QuestionTypeCompound):
 
 @dataclass
 class QuestionTypeText(QuestionTypePlain):
-    response: str | None = None
+    _response: str | None = field(default=None,init=False)
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
         'missing': LocalizedText('A response is required'),
-        'typemismatch': LocalizedText('Expected response of type text'),
+        'typemismatch': LocalizedText('Expected _response of type text'),
     })
     @property
     def type_str(self) -> str:
@@ -342,16 +346,16 @@ class QuestionTypeText(QuestionTypePlain):
         if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
-            self.response = data
+            self._response = data
         return self
 
 @dataclass
 class QuestionTypeInt(QuestionTypePlain):
-    response: int | None = None
+    _response: int | None = field(default=None,init=False)
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
         'missing': LocalizedText('A response is required'),
-        'typemismatch': LocalizedText('Expected response of type integer'),
+        'typemismatch': LocalizedText('Expected _response of type integer'),
     })
     @property
     def type_str(self) -> str:
@@ -376,16 +380,16 @@ class QuestionTypeInt(QuestionTypePlain):
         if not self.validate(data,helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
-            self.response = data
+            self._response = data
         return self
 
 @dataclass
 class QuestionTypeFloat(QuestionTypePlain):
-    response: float | None = None
+    _response: float | None = field(default=None,init=False)
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
         'missing': LocalizedText('A response is required'),
-        'typemismatch': LocalizedText('Expected response of type float (floating-point real number)'),
+        'typemismatch': LocalizedText('Expected _response of type float (floating-point real number)'),
     })
     @property
     def type_str(self) -> str:
@@ -410,16 +414,16 @@ class QuestionTypeFloat(QuestionTypePlain):
         if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
-            self.response = data
+            self._response = data
         return self
 
 @dataclass
 class QuestionTypeBool(QuestionTypePlain):
-    response: bool | None = None
+    _response: bool | None = field(default=None,init=False)
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
         'missing': LocalizedText('A response is required'),
-        'typemismatch': LocalizedText('Expected response of type boolean'),
+        'typemismatch': LocalizedText('Expected _response of type boolean'),
     })
     @property
     def type_str(self) -> str:
@@ -444,16 +448,16 @@ class QuestionTypeBool(QuestionTypePlain):
         if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
-            self.response = data
+            self._response = data
         return self
 
 @dataclass
 class QuestionTypeDatetime(QuestionTypePlain):
-    response: datetime | None = None
+    _response: datetime | None = field(default=None,init=False)
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
         'missing': LocalizedText('A response is required'),
-        'typemismatch': LocalizedText('Expected response of type date/time'),
+        'typemismatch': LocalizedText('Expected _response of type date/time'),
     })
     @property
     def type_str(self) -> str:
@@ -488,12 +492,12 @@ class QuestionTypeDatetime(QuestionTypePlain):
         if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
-            self.response = data
+            self._response = data
         return self
 
 @dataclass
 class QuestionTypeSinglePunch(QuestionTypePlain):
-    response: Category | None = None
+    _response: Category | None = field(default=None,init=False)
     categories: set[Category] = field(default_factory=set)
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
@@ -523,12 +527,12 @@ class QuestionTypeSinglePunch(QuestionTypePlain):
         if not self.validate(data, helper_fields_data):
             raise self._ValidationError('Validation failed')
         if data is not None:
-            self.response = next(iter(set(cat for cat in self.categories if cat.name==data)))
+            self._response = next(iter(set(cat for cat in self.categories if cat.name==data)))
         return self
 
 @dataclass
 class QuestionTypeMultiPunch(QuestionTypePlain):
-    response: set[Category] | None = None # field(default_factory=set)
+    _response: set[Category] | None = field(default=None,init=False)
     categories: set[Category] = field(default_factory=set)
     validation: Callable | None = None
     error: dict[str,LocalizedText] = field(default_factory=lambda: {
@@ -574,5 +578,5 @@ class QuestionTypeMultiPunch(QuestionTypePlain):
                 else:
                     raise self._ValidationError(str(self.error['notfromresplist']).format(resp=repr(d)))
             data = set( find_cat(d) for d in data )
-            self.response = data
+            self._response = data
         return self
