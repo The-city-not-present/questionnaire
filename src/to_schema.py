@@ -89,7 +89,14 @@ def question_to_schema(question_instance: Question) -> dict:
             "properties": {
                 f.name: question_to_schema(f) for f in question.fields
             },
+            "required": [ f.name for f in question.fields if f.is_required ],
             "x-ui": {
+                "is_plain": hasattr(question,'is_plain') and question.is_plain,
+                "is_root": hasattr(question,'is_root') and question.is_root,
+                "is_hidden": hasattr(question,'is_hidden') and question.is_hidden,
+                "is_system": hasattr(question,'is_system') and question.is_system,
+                "is_derived": hasattr(question,'is_derived') and question.is_derived,
+                "is_required": hasattr(question,'is_required') and question.is_required,
                 **{key: value for mod in question.modifiers for key, value in mod.as_json().items()},
             },
             "x-properties": question.properties,
@@ -102,6 +109,12 @@ def question_to_schema(question_instance: Question) -> dict:
             "type": "object",
             "title": str(question.category.label),
             "x-ui": {
+                "is_plain": hasattr(question,'is_plain') and question.is_plain,
+                "is_root": hasattr(question,'is_root') and question.is_root,
+                "is_hidden": hasattr(question,'is_hidden') and question.is_hidden,
+                "is_system": hasattr(question,'is_system') and question.is_system,
+                "is_derived": hasattr(question,'is_derived') and question.is_derived,
+                "is_required": hasattr(question,'is_required') and question.is_required,
                 **{key: value for mod in question.modifiers for key, value in mod.as_json().items()},
             },
             "x-properties": question.properties,
@@ -148,6 +161,7 @@ def question_to_schema(question_instance: Question) -> dict:
         "properties": {
             f.name: question_to_schema(f) for f in question_fields
         },
+        "required": [ f.name for f in question_fields if f.is_required ],
         "x-categories":
             {
                 cat.name: question_to_schema(CategoryElementClass( name=cat.name, label=cat.label, properties=cat.properties, modifiers=cat.modifiers, category=cat ))
@@ -158,6 +172,12 @@ def question_to_schema(question_instance: Question) -> dict:
         "x-validation-rules": make_validation_rules(question),
         "x-widget": question.widget,
         "x-ui": {
+            "is_plain": hasattr(question,'is_plain') and question.is_plain,
+            "is_root": hasattr(question,'is_root') and question.is_root,
+            "is_hidden": hasattr(question,'is_hidden') and question.is_hidden,
+            "is_system": hasattr(question,'is_system') and question.is_system,
+            "is_derived": hasattr(question,'is_derived') and question.is_derived,
+            "is_required": hasattr(question,'is_required') and question.is_required,
             **{ key: value for mod in question.modifiers for key, value in mod.as_json().items() },
         },
         "x-properties": question.properties,
